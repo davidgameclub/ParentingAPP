@@ -336,14 +336,6 @@ struct FireworksView: UIViewRepresentable {
     }
 }
 
-// 暫時的 MainMenuView，若檔案缺失可補上
-struct MainMenuView: View {
-    var body: some View {
-        Text("Main Menu")
-            .font(.title)
-    }
-}
-
 #Preview {
     ContentView()
         .environment(\.managedObjectContext, PersistenceController.shared.container.viewContext)
