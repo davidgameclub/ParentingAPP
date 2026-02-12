@@ -7,7 +7,7 @@
 
 import SwiftUI
 
-struct MainMenuView: View {
+struct MainFenuView: View {
     // State to track the currently selected tab
     @State private var selectedTab: Tab = .home
     
@@ -26,7 +26,7 @@ struct MainMenuView: View {
             
             // 1. Home Tab
             NavigationStack { // FIX 1: Wrapping in NavigationStack
-                //HomePageView()
+                HomePageView()
             }
             .tabItem {
                 Label("Home", systemImage: "house.fill")

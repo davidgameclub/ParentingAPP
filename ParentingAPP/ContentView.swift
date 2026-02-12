@@ -43,7 +43,7 @@ struct ContentView: View {
                             
                             Section {
                                 NavigationLink {
-                                    MainMenuView()
+                                    MainFenuView()
                                 } label: {
                                     Text("進入主選單")
                                         .bold()
