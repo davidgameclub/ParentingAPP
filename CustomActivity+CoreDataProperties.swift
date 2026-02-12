@@ -28,3 +28,4 @@ extension CustomActivity {
 extension CustomActivity : Identifiable {
 
 }
+
