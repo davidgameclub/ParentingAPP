@@ -943,6 +943,9 @@ struct HomePageView: View {
                 withAnimation(.easeOut(duration: 0.1)) { pressingItem = hitItem }
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { // 設為 0.25s
                     if pressingItem == hitItem && !isScrollMode && !isReorderMode {
+                        // ✅ 加入這裡：觸發震動回饋
+                        let generator = UIImpactFeedbackGenerator(style: .medium) // .medium 是標準的長按震動感
+                        generator.impactOccurred()
                         startReordering(item: hitItem, index: index, containerY: containerFrame.midY)
                     }
                 }
