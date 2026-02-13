@@ -39,6 +39,7 @@ enum ActivityItem: Identifiable {
     case custom(CustomActivity)
     case feeding(FeedingBottleActivity)
     case diaper(DiaperActivity)
+    case breastFeeding(BreastFeedingActivity) // 新增：親餵
     
     var id: NSManagedObjectID {
         switch self {
@@ -47,6 +48,7 @@ enum ActivityItem: Identifiable {
         case .custom(let a): return a.objectID
         case .feeding(let a): return a.objectID
         case .diaper(let a): return a.objectID
+        case .breastFeeding(let a): return a.objectID
         }
     }
     
@@ -57,6 +59,7 @@ enum ActivityItem: Identifiable {
         case .custom(let a): return a.timestamp ?? Date()
         case .feeding(let a): return a.timestamp ?? Date()
         case .diaper(let a): return a.timestamp ?? Date()
+        case .breastFeeding(let a): return a.timestamp ?? Date()
         }
     }
     
@@ -67,6 +70,7 @@ enum ActivityItem: Identifiable {
         case .custom(let a): return a.note ?? ""
         case .feeding(let a): return a.note ?? ""
         case .diaper(let a): return a.note ?? ""
+        case .breastFeeding(let a): return a.note ?? ""
         }
     }
     
@@ -77,6 +81,7 @@ enum ActivityItem: Identifiable {
         case .custom(let a): return a.isStart ? "開始" : "結束"
         case .feeding: return "瓶餵"
         case .diaper: return "尿布"
+        case .breastFeeding: return "親餵"
         }
     }
 
@@ -87,12 +92,14 @@ enum ActivityItem: Identifiable {
         case .custom: return .customActivity
         case .feeding: return .feeding
         case .diaper: return .diaper
+        case .breastFeeding: return .breastFeeding
         }
     }
 
     var attributeValue: String? {
         switch self {
         case .feeding(let a): return "\(a.volume)ml"
+        case .breastFeeding(let a): return "\(a.volume)ml" // 親餵顯示奶量
         case .diaper(let a): return a.type ?? ""
         default: return nil
         }
@@ -100,7 +107,7 @@ enum ActivityItem: Identifiable {
 
     var isDetailInstruction: Bool {
         switch self {
-        case .feeding, .diaper: return true
+        case .feeding, .diaper, .breastFeeding: return true
         default: return false
         }
     }
@@ -113,6 +120,7 @@ enum ActivityItem: Identifiable {
     // 輔助屬性，用於 View 中判斷類型
     var isCustom: Bool { if case .custom = self { return true }; return false }
     var isFeeding: Bool { if case .feeding = self { return true }; return false }
+    var isBreastFeeding: Bool { if case .breastFeeding = self { return true }; return false }
     var isDiaper: Bool { if case .diaper = self { return true }; return false }
     
     // 新增：格式化時間字串
@@ -271,6 +279,7 @@ struct DailyTimelineContentView: View {
     @FetchRequest var sleeps: FetchedResults<SleepActivity>
     @FetchRequest var customActivities: FetchedResults<CustomActivity>
     @FetchRequest var feedings: FetchedResults<FeedingBottleActivity>
+    @FetchRequest var breastFeedings: FetchedResults<BreastFeedingActivity> // 新增
     @FetchRequest var diapers: FetchedResults<DiaperActivity>
     
     @State private var editingActivity: ActivityItem?
@@ -301,6 +310,10 @@ struct DailyTimelineContentView: View {
             sortDescriptors: [NSSortDescriptor(keyPath: \FeedingBottleActivity.timestamp, ascending: true)],
             predicate: predicate
         )
+        _breastFeedings = FetchRequest( // 新增
+            sortDescriptors: [NSSortDescriptor(keyPath: \BreastFeedingActivity.timestamp, ascending: true)],
+            predicate: predicate
+        )
         _diapers = FetchRequest(
             sortDescriptors: [NSSortDescriptor(keyPath: \DiaperActivity.timestamp, ascending: true)],
             predicate: predicate
@@ -328,8 +341,9 @@ struct DailyTimelineContentView: View {
         let s = sleeps.map { ActivityItem.sleep($0) }
         let c = customActivities.map { ActivityItem.custom($0) }
         let f = feedings.map { ActivityItem.feeding($0) }
+        let bf = breastFeedings.map { ActivityItem.breastFeeding($0) } // 新增
         let d = diapers.map { ActivityItem.diaper($0) }
-        return (w + s + c + f + d).sorted { $0.timestamp < $1.timestamp }
+        return (w + s + c + f + bf + d).sorted { $0.timestamp < $1.timestamp }
     }
 
     private var positionedActivityItems: [PositionedActivityItem] {
@@ -548,6 +562,7 @@ struct ActivityEditView: View {
         switch item {
         case .custom(let activity): initialIsStart = activity.isStart
         case .feeding(let activity): initialVolume = Int(activity.volume)
+        case .breastFeeding(let activity): initialVolume = Int(activity.volume) // 新增：提取親餵量
         case .diaper(let activity): initialDiaperType = activity.type ?? "濕"
         default: break
         }
@@ -570,6 +585,7 @@ struct ActivityEditView: View {
         case .sleep(let activity): activity.timestamp = finalDate; activity.note = note
         case .custom(let activity): activity.timestamp = finalDate; activity.note = note; activity.isStart = isStart
         case .feeding(let activity): activity.timestamp = finalDate; activity.note = note; activity.volume = Int32(volume)
+        case .breastFeeding(let activity): activity.timestamp = finalDate; activity.note = note; activity.volume = Int32(volume) // 新增
         case .diaper(let activity): activity.timestamp = finalDate; activity.note = note; activity.type = diaperType
         }
         try? viewContext.save(); onDismiss()
@@ -581,6 +597,7 @@ struct ActivityEditView: View {
         case .sleep(let activity): viewContext.delete(activity)
         case .custom(let activity): viewContext.delete(activity)
         case .feeding(let activity): viewContext.delete(activity)
+        case .breastFeeding(let activity): viewContext.delete(activity) // 新增
         case .diaper(let activity): viewContext.delete(activity)
         }
         try? viewContext.save(); onDismiss()
@@ -596,7 +613,8 @@ struct ActivityEditView: View {
                 if item.isCustom {
                     Toggle(isOn: $isStart) { Text(isStart ? "標記為：開始" : "標記為：結束").fontWeight(.bold) }.toggleStyle(.button).tint(isStart ? .green : .red).padding(.bottom, 5)
                 }
-                if item.isFeeding {
+                // 共用介面：瓶餵與親餵
+                if item.isFeeding || item.isBreastFeeding {
                     VStack(alignment: .leading, spacing: 5) {
                         Text("餵奶量：\(volume) ml").font(.subheadline).bold()
                         Slider(value: Binding(get: { Double(volume) }, set: { volume = Int($0) }), in: 0...400, step: 5)
@@ -655,7 +673,8 @@ struct ButtonDestinationView: View {
             if buttonCase == .customActivity {
                 Toggle(isOn: $isStart) { Text(isStart ? "標記為：開始" : "標記為：結束").fontWeight(.bold) }.toggleStyle(.button).tint(isStart ? .green : .red)
             }
-            if buttonCase == .feeding {
+            // 共用介面：瓶餵與親餵
+            if buttonCase == .feeding || buttonCase == .breastFeeding {
                 VStack(alignment: .leading, spacing: 5) {
                     Text("奶量：\(volume) ml").font(.headline).foregroundColor(.white)
                     Slider(value: Binding(get: { Double(volume) }, set: { volume = Int($0) }), in: 0...400, step: 5).accentColor(.pink)
@@ -691,6 +710,11 @@ struct ButtonDestinationView: View {
                         a.timestamp = finalDate
                         a.note = note
                         a.volume = Int32(volume)
+                    case .breastFeeding: // 新增：儲存親餵
+                        let a = BreastFeedingActivity(context: viewContext)
+                        a.timestamp = finalDate
+                        a.note = note
+                        a.volume = Int32(volume)
                     case .diaper:
                         let a = DiaperActivity(context: viewContext)
                         a.timestamp = finalDate
@@ -706,21 +730,21 @@ struct ButtonDestinationView: View {
 }
 
 enum HomePageButtonCase: Int, Identifiable, CaseIterable{
-    case wakeup = 1, sleep = 2, customActivity = 3, feeding = 5, diaper = 6
+    case wakeup = 1, sleep = 2, customActivity = 3, feeding = 5, diaper = 6, breastFeeding = 7 // 新增：親餵 ID
     var id: Int { self.rawValue }
     var title: String {
         switch self {
-        case .wakeup: return "起床"; case .sleep: return "睡覺"; case .customActivity: return "活動"; case .feeding: return "瓶餵"; case .diaper: return "尿布"
+        case .wakeup: return "起床"; case .sleep: return "睡覺"; case .customActivity: return "活動"; case .feeding: return "瓶餵"; case .diaper: return "尿布"; case .breastFeeding: return "親餵"
         }
     }
     var iconName: String {
         switch self {
-        case .wakeup: return "sun.max.fill"; case .sleep: return "moon.zzz.fill"; case .customActivity: return "figure.run"; case .feeding: return "drop.fill"; case .diaper: return "water.waves"
+        case .wakeup: return "sun.max.fill"; case .sleep: return "moon.zzz.fill"; case .customActivity: return "figure.run"; case .feeding: return "drop.fill"; case .diaper: return "water.waves"; case .breastFeeding: return "heart.fill"
         }
     }
     var color: Color {
         switch self {
-        case .wakeup: return .orange; case .sleep: return .indigo; case .customActivity: return .green; case .feeding: return .pink; case .diaper: return .green
+        case .wakeup: return .orange; case .sleep: return .indigo; case .customActivity: return .green; case .feeding: return .pink; case .diaper: return .green; case .breastFeeding: return .purple
         }
     }
 }
