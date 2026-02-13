@@ -961,7 +961,7 @@ struct HomePageView: View {
                 }
                 
                 // 啟動長按計時
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                     if pressingItem == hitItem && !isScrollMode && !isReorderMode {
                         startReordering(item: hitItem, index: index, containerY: containerFrame.midY)
                     }
