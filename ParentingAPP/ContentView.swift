@@ -19,8 +19,11 @@ struct ContentView: View {
     
     // MARK: - State Properties
     @State private var name: String = ""
+    @State private var navigateToNameEntry: Bool = false
     @State private var navigateToGender: Bool = false
     @State private var showCelebration: Bool = false
+    @State private var navigateToHome: Bool = false
+    @State private var didAttemptAutoNavigation = false
     
     var body: some View {
         NavigationStack {
@@ -42,13 +45,14 @@ struct ContentView: View {
                             }
                             
                             Section {
-                                NavigationLink {
-                                    MainFenuView()
+                                Button {
+                                    navigateToHome = true
                                 } label: {
                                     Text("進入主選單")
                                         .bold()
                                         .frame(maxWidth: .infinity)
                                 }
+                                .foregroundColor(.accentColor)
                             }
                             
                             Section {
@@ -63,58 +67,18 @@ struct ContentView: View {
                             }
                         }
                         .scrollContentBackground(.hidden)
+                        .onAppear {
+                            if !didAttemptAutoNavigation {
+                                didAttemptAutoNavigation = true
+                                // 使用 async 確保在 View 更新週期結束後才修改狀態
+                                DispatchQueue.main.async {
+                                    navigateToHome = true
+                                }
+                            }
+                        }
                     } else {
-                        VStack(spacing: 0) {
-                            // 頂部灰色色塊
-                            HStack {
-                                Spacer()
-                                Text("設定寶寶資料")
-                                    .font(.title)
-                                    .foregroundStyle(.black)
-                                Spacer()
-                            }
-                            .padding()
-                            .background(Color(UIColor.systemGray5))
-                            
-                            Spacer()
-                            
-                            VStack(spacing: 36) {
-                                Text("寶寶暱稱")
-                                    .font(.title2)
-                                    .bold()
-                                
-                                VStack(spacing: 12) {
-                                    TextField("輸入", text: $name)
-                                        .textFieldStyle(.roundedBorder)
-                                        .textContentType(.name)
-                                        .multilineTextAlignment(.center)
-                                        .font(.title3)
-                                        .padding(.horizontal, 60)
-                                    
-                                    Text("請輸入寶寶暱稱或乳名")
-                                        .font(.footnote)
-                                        .foregroundStyle(.secondary)
-                                }
-                                
-                                Button(action: {
-                                    if !name.isEmpty {
-                                        navigateToGender = true
-                                    }
-                                }) {
-                                    Text("下一步")
-                                        .bold()
-                                        .frame(maxWidth: .infinity)
-                                        .padding()
-                                        .background(name.isEmpty ? Color.gray.opacity(0.3) : Color.blue)
-                                        .foregroundColor(.white)
-                                        .cornerRadius(30)
-                                }
-                                .disabled(name.isEmpty)
-                                .padding(.horizontal, 120)
-                            }
-                            
-                            Spacer()
-                            Spacer()
+                        RegistrationView {
+                            navigateToNameEntry = true
                         }
                     }
                 }
@@ -128,6 +92,15 @@ struct ContentView: View {
                 }
             }
             .navigationBarTitleDisplayMode(.inline)
+            .navigationDestination(isPresented: $navigateToHome) {
+                MainFenuView()
+            }
+            .navigationDestination(isPresented: $navigateToNameEntry) {
+                BabyNameView { enteredName in
+                    self.name = enteredName
+                    self.navigateToGender = true
+                }
+            }
             .navigationDestination(isPresented: $navigateToGender) {
                 GenderView(name: name) {
                     name = ""
@@ -165,11 +138,124 @@ struct ContentView: View {
     }
 }
 
+struct RegistrationView: View {
+    var onRegister: () -> Void
+    
+    var body: some View {
+        VStack(spacing: 0) {
+            // 頂部灰色色塊
+            HStack {
+                Spacer()
+                Text("歡迎")
+                    .font(.title)
+                    .foregroundStyle(.black)
+                Spacer()
+            }
+            .padding()
+            .background(Color(UIColor.systemGray5))
+            
+            Spacer()
+            
+            VStack(spacing: 24) {
+                Button(action: {
+                    onRegister()
+                }) {
+                    Text("註冊帳號")
+                        .bold()
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                        .background(Color.blue)
+                        .foregroundColor(.white)
+                        .cornerRadius(30)
+                }
+                
+                Button(action: {
+                    // 未來實作共享代碼邏輯
+                }) {
+                    Text("使用共享代碼")
+                        .bold()
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                        .background(Color.secondary.opacity(0.5))
+                        .foregroundColor(.white)
+                        .cornerRadius(30)
+                }
+            }
+            .padding(.horizontal, 60)
+            
+            Spacer()
+            Spacer()
+        }
+    }
+}
+
+struct BabyNameView: View {
+    @State private var name: String = ""
+    var onNext: (String) -> Void
+    
+    var body: some View {
+        VStack(spacing: 0) {
+            // 頂部灰色色塊
+            HStack {
+                Spacer()
+                Text("設定寶寶資料")
+                    .font(.title)
+                    .foregroundStyle(.black)
+                Spacer()
+            }
+            .padding()
+            .background(Color(UIColor.systemGray5))
+            
+            Spacer()
+            
+            VStack(spacing: 36) {
+                Text("寶寶暱稱")
+                    .font(.title2)
+                    .bold()
+                
+                VStack(spacing: 12) {
+                    TextField("輸入", text: $name)
+                        .textFieldStyle(.roundedBorder)
+                        .textContentType(.name)
+                        .multilineTextAlignment(.center)
+                        .font(.title3)
+                        .padding(.horizontal, 60)
+                    
+                    Text("請輸入寶寶暱稱或乳名")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                
+                Button(action: {
+                    if !name.isEmpty {
+                        onNext(name)
+                    }
+                }) {
+                    Text("下一步")
+                        .bold()
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                        .background(name.isEmpty ? Color.gray.opacity(0.3) : Color.blue)
+                        .foregroundColor(.white)
+                        .cornerRadius(30)
+                }
+                .disabled(name.isEmpty)
+                .padding(.horizontal, 120)
+            }
+            
+            Spacer()
+            Spacer()
+        }
+        .navigationTitle("暱稱設定")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
 struct GenderView: View {
     let name: String
     var onComplete: () -> Void
     
-    @State private var selectedGender: String = ""
+    @State private var selectedGender: String = "男生"
     @State private var navigateToBirth = false
     let genders = ["男生", "女生"]
     
@@ -185,7 +271,6 @@ struct GenderView: View {
                     .foregroundColor(.secondary)
                 
                 Picker("Gender", selection: $selectedGender) {
-                    Text("請選擇").tag("")
                     ForEach(genders, id: \.self) { gender in
                         Text(gender).tag(gender)
                     }
@@ -198,11 +283,10 @@ struct GenderView: View {
                         .bold()
                         .frame(maxWidth: .infinity)
                         .padding()
-                        .background(selectedGender.isEmpty ? Color.gray.opacity(0.3) : Color.blue)
+                        .background(Color.blue)
                         .foregroundColor(.white)
                         .cornerRadius(12)
                 }
-                .disabled(selectedGender.isEmpty)
                 .padding(.horizontal, 40)
             }
             Spacer()
