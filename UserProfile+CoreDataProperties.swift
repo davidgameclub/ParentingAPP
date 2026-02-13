@@ -18,10 +18,10 @@ extension UserProfile {
         return NSFetchRequest<UserProfile>(entityName: "UserProfile")
     }
 
-    @NSManaged public var name: String?
-    @NSManaged public var gender: String?
     @NSManaged public var birthDate: Date?
     @NSManaged public var createdAt: Date?
+    @NSManaged public var gender: String?
+    @NSManaged public var name: String?
 
 }
 

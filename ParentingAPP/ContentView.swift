@@ -128,9 +128,9 @@ struct ContentView: View {
             viewContext.delete(profile)
             do {
                 try viewContext.save()
+                // 重置導航狀態，確保刪除後回到註冊流程
+                didAttemptAutoNavigation = false
             } catch {
-                // Replace this implementation with code to handle the error appropriately.
-                // fatalError() causes the application to generate a crash log and terminate. You should not use this function in a shipping application, although it may be useful during development.
                 let nsError = error as NSError
                 print("Unresolved error \(nsError), \(nsError.userInfo)")
             }
@@ -138,12 +138,12 @@ struct ContentView: View {
     }
 }
 
+// MARK: - RegistrationView
 struct RegistrationView: View {
     var onRegister: () -> Void
     
     var body: some View {
         VStack(spacing: 0) {
-            // 頂部灰色色塊
             HStack {
                 Spacer()
                 Text("歡迎")
@@ -189,13 +189,13 @@ struct RegistrationView: View {
     }
 }
 
+// MARK: - BabyNameView
 struct BabyNameView: View {
     @State private var name: String = ""
     var onNext: (String) -> Void
     
     var body: some View {
         VStack(spacing: 0) {
-            // 頂部灰色色塊
             HStack {
                 Spacer()
                 Text("設定寶寶資料")
@@ -251,6 +251,7 @@ struct BabyNameView: View {
     }
 }
 
+// MARK: - GenderView
 struct GenderView: View {
     let name: String
     var onComplete: () -> Void
@@ -302,14 +303,14 @@ struct GenderView: View {
     }
 }
 
+// MARK: - BirthView
 struct BirthView: View {
     let name: String
     let gender: String
     var onComplete: () -> Void
     
-    // Core Data 使用 managedObjectContext，而不是 modelContext (SwiftData)
-    @Environment(\.managedObjectContext) private var viewContext
     @State private var birthDate = Date()
+    @State private var navigateToSummary = false
     
     var body: some View {
         VStack {
@@ -329,8 +330,8 @@ struct BirthView: View {
                 .environment(\.locale, Locale(identifier: "zh_Hant_TW"))
                 .frame(height: 200)
                 
-                Button(action: saveProfile) {
-                    Text("完成設定")
+                Button(action: { navigateToSummary = true }) {
+                    Text("下一步：確認總覽")
                         .bold()
                         .frame(maxWidth: .infinity)
                         .padding()
@@ -347,10 +348,68 @@ struct BirthView: View {
         .background(Color(UIColor.systemGray6).ignoresSafeArea())
         .navigationTitle("出生日期")
         .navigationBarTitleDisplayMode(.inline)
+        .navigationDestination(isPresented: $navigateToSummary) {
+            SummaryView(name: name, gender: gender, birthDate: birthDate, onComplete: onComplete)
+        }
+    }
+}
+
+// MARK: - SummaryView
+struct SummaryView: View {
+    let name: String
+    let gender: String
+    let birthDate: Date
+    var onComplete: () -> Void
+    
+    @Environment(\.managedObjectContext) private var viewContext
+    
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Spacer()
+                Text("寶寶資料總覽")
+                    .font(.title)
+                    .foregroundStyle(.black)
+                Spacer()
+            }
+            .padding()
+            .background(Color(UIColor.systemGray5))
+            
+            List {
+                Section {
+                    LabeledContent("暱稱", value: name)
+                    LabeledContent("性別", value: gender)
+                    LabeledContent("生日", value: birthDate.formatted(.dateTime.year().month().day().locale(Locale(identifier: "zh_Hant_TW"))))
+                } header: {
+                    Text("請確認以下資料是否正確")
+                }
+            }
+            .scrollContentBackground(.hidden)
+            
+            VStack(spacing: 16) {
+                Button(action: saveProfile) {
+                    Text("確認並儲存")
+                        .bold()
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                        .background(Color.blue)
+                        .foregroundColor(.white)
+                        .cornerRadius(30)
+                }
+                .padding(.horizontal, 60)
+                
+                Text("儲存後，若要修改需刪除後重新建立。")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.bottom, 40)
+        }
+        .background(Color(UIColor.systemGray6).ignoresSafeArea())
+        .navigationTitle("總覽")
+        .navigationBarTitleDisplayMode(.inline)
     }
     
     private func saveProfile() {
-        // 使用 Core Data 的方式初始化物件
         let newProfile = UserProfile(context: viewContext)
         newProfile.name = name
         newProfile.gender = gender
@@ -366,7 +425,7 @@ struct BirthView: View {
     }
 }
 
-// 修改為「由下往上」發射的特效
+// MARK: - FireworksView
 struct FireworksView: UIViewRepresentable {
     func makeUIView(context: Context) -> UIView {
         let view = UIView()
