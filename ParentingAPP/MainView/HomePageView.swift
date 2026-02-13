@@ -496,14 +496,19 @@ struct DailyTimelineContentView: View {
                     
                     if Calendar.current.isDate(startDate, inSameDayAs: Date()) {
                         HStack(spacing: 0) {
-                            ZStack(alignment: .trailing) {
-                                HStack(spacing: 2) {
-                                    Text("NOW").font(.system(size: 8, weight: .bold)).foregroundColor(.red)
-                                    Circle().fill(.red).frame(width: 6, height: 6)
-                                }.padding(.trailing, 2)
-                            }.frame(width: timeLabelWidth, alignment: .trailing)
-                            Rectangle().fill(Color.red.opacity(0.6)).frame(height: 2)
-                        }.offset(y: yOffset(for: Date()))
+                            Color.clear.frame(width: timeLabelWidth)
+                            Rectangle().fill(Color.red.opacity(0.6))
+                        }
+                        .frame(height: 2)
+                        .overlay(alignment: .leading) {
+                            HStack(spacing: 2) {
+                                Text("NOW").font(.system(size: 8, weight: .bold)).foregroundColor(.red)
+                                Circle().fill(.red).frame(width: 6, height: 6)
+                            }
+                            .padding(.trailing, 2)
+                            .frame(width: timeLabelWidth, alignment: .trailing)
+                        }
+                        .offset(y: yOffset(for: Date()) - 1)
                     }
                 }
             }
