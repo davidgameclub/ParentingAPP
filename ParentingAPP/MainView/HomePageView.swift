@@ -834,13 +834,15 @@ struct HomePageView: View {
     @State private var isReorderMode: Bool = false
     @State private var touchStartTime: Date? = nil
     @State private var startTouchLocation: CGPoint = .zero
+    
+    // 🆕 新增：自動捲動計時器
+    @State private var autoScrollTimer: Timer?
 
     var body: some View {
         VStack(spacing: 0) {
             DailyTimelineView().frame(height: 600)
             Spacer()
             
-            // 自定義滑動區域
             customScrollView
                 .frame(height: kContainerHeight)
                 .zIndex(1)
@@ -868,8 +870,7 @@ struct HomePageView: View {
             let frame = geo.frame(in: .global)
             
             ZStack(alignment: .leading) {
-                // 內容層
-                HStack(spacing: 0) { // 間距設為0，完全由 frame(width: 80) 控制
+                HStack(spacing: 0) {
                     ForEach(buttons) { item in
                         HomePageButtonView(
                             caseItem: item,
@@ -881,7 +882,6 @@ struct HomePageView: View {
                 .padding(.horizontal, kPadding)
                 .background(GeometryReader { contentGeo in
                     Color.clear.onAppear {
-                        // 初始化寬度
                         self.contentWidth = contentGeo.size.width
                         self.containerWidth = frame.width
                     }
@@ -892,7 +892,7 @@ struct HomePageView: View {
                 .offset(x: scrollOffset + (isReorderMode ? 0 : currentDragOffset))
             }
             .frame(height: kContainerHeight)
-            .contentShape(Rectangle()) // 確保手勢區域覆蓋整個容器
+            .contentShape(Rectangle())
             .gesture(
                 DragGesture(minimumDistance: 0, coordinateSpace: .global)
                     .onChanged { value in
@@ -920,23 +920,11 @@ struct HomePageView: View {
         }
     }
     
-    // MARK: - 核心邏輯 (數學計算取代座標偵測)
+    // MARK: - 邏輯核心
     
-    /// 根據觸控點的 Global X 座標，計算出點到了第幾個按鈕
     private func calculateHitIndex(at globalX: CGFloat) -> Int? {
-        // 1. 取得相對於 Container 左側的 X (扣除 Global Frame 的偏移)
-        // 由於我們 DragGesture 用 .global，但我們需要知道它相對於內容起始點的位置
-        // 假設 container 充滿螢幕寬度，我們主要關心 X 軸相對位移
-        
-        // 內容的起始 X 位置 = scrollOffset + padding
-        // 觸控點相對於內容第一顆按鈕左邊界的距離 = globalX - (scrollOffset + padding)
-        
         let relativeX = globalX - (scrollOffset + kPadding)
-        
-        // 算出是第幾顆 (無條件捨去)
         let index = Int(floor(relativeX / kButtonWidth))
-        
-        // 邊界檢查
         if index >= 0 && index < buttons.count {
             return index
         }
@@ -947,21 +935,13 @@ struct HomePageView: View {
         let location = value.location
         let translation = value.translation
         
-        // 1. 剛按下去
         if touchStartTime == nil {
             touchStartTime = Date()
             startTouchLocation = location
-            
-            // 使用數學計算命中哪個按鈕
             if let index = calculateHitIndex(at: location.x) {
                 let hitItem = buttons[index]
-                
-                withAnimation(.easeOut(duration: 0.1)) {
-                    pressingItem = hitItem
-                }
-                
-                // 啟動長按計時
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                withAnimation(.easeOut(duration: 0.1)) { pressingItem = hitItem }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { // 設為 0.25s
                     if pressingItem == hitItem && !isScrollMode && !isReorderMode {
                         startReordering(item: hitItem, index: index, containerY: containerFrame.midY)
                     }
@@ -969,21 +949,32 @@ struct HomePageView: View {
             }
         }
         
-        // 2. 模式處理
         if isReorderMode {
             // --- 重排模式 ---
             withAnimation(.interactiveSpring(response: 0.1, dampingFraction: 0.7)) {
                 ghostPosition = location
             }
             
-            // 檢查是否移到了別的按鈕位置 (同樣使用數學計算)
-            if let targetIndex = calculateHitIndex(at: location.x) {
-                let targetItem = buttons[targetIndex]
-                if targetItem != reorderingItem {
-                    withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                        moveItem(from: reorderingItem!, to: targetItem)
-                    }
-                }
+            // 🆕 新增：邊緣自動捲動檢測
+            // 定義熱區：距離螢幕邊緣 50 點
+            let edgeThreshold: CGFloat = 50
+            let maxScrollSpeed: CGFloat = 8 // 捲動速度
+            
+            // 判斷手指是否在熱區
+            if location.x < edgeThreshold {
+                // 手指在左邊緣 -> 列表向右滑 (Offset 增加)
+                startAutoScroll(speed: maxScrollSpeed)
+            } else if location.x > containerWidth - edgeThreshold {
+                // 手指在右邊緣 -> 列表向左滑 (Offset 減少)
+                startAutoScroll(speed: -maxScrollSpeed)
+            } else {
+                // 手指在中間 -> 停止自動捲動
+                stopAutoScroll()
+            }
+            
+            // 碰撞交換 (如果不在自動捲動中，手動觸發一次；如果在自動捲動中，Timer 會處理)
+            if autoScrollTimer == nil {
+                checkForReorderCollision(at: location.x)
             }
             
         } else {
@@ -999,9 +990,7 @@ struct HomePageView: View {
             
             if isScrollMode {
                 let proposedOffset = scrollOffset + translation.width
-                // 邊界阻尼
                 let minOffset = min(0, containerWidth - contentWidth - (kPadding * 2))
-                
                 if proposedOffset > 0 {
                     currentDragOffset = translation.width - (proposedOffset * 0.5)
                 } else if proposedOffset < minOffset {
@@ -1015,97 +1004,126 @@ struct HomePageView: View {
     }
     
     private func handleTouchEnd(value: DragGesture.Value) {
-            // 1. 為了避免邏輯錯誤，我們先把需要的狀態存下來，或者調整執行順序
-            // 這裡我們採用「先判斷、後清理」的策略
+        // 🆕 確保手指放開時停止計時器
+        stopAutoScroll()
+        
+        if isScrollMode {
+            let currentVisualOffset = scrollOffset + currentDragOffset
+            scrollOffset = currentVisualOffset
+            currentDragOffset = 0
             
-            // --- 判斷 A: 是否為滑動模式 (Scroll Mode) ---
-            if isScrollMode {
-                // A-1. 提交位移 (Commit): 解決跳動的關鍵
-                // 把目前的「暫時位移」加進「永久捲動值」，這樣畫面就會停在手指放開的地方
-                let currentVisualOffset = scrollOffset + currentDragOffset
-                scrollOffset = currentVisualOffset
-                currentDragOffset = 0
-                
-                // A-2. 計算慣性 (Inertia)
-                let velocity = value.predictedEndTranslation.width - value.translation.width
-                let inertia = velocity * 0.6 // 慣性係數
-                let targetOffset = scrollOffset + inertia
-                
-                // A-3. 邊界限制 (Clamping)
-                let minOffset = min(0, containerWidth - contentWidth - (kPadding * 2))
-                let maxOffset: CGFloat = 0
-                
-                var finalDestination = targetOffset
-                if finalDestination > maxOffset { finalDestination = maxOffset }
-                else if finalDestination < minOffset { finalDestination = minOffset }
-                
-                // A-4. 執行滑動動畫
-                withAnimation(.spring(response: 0.4, dampingFraction: 0.8, blendDuration: 0)) {
-                    scrollOffset = finalDestination
-                }
-                
-                // A-5. 最後才清理狀態
-                isScrollMode = false
-                touchStartTime = nil
-                startTouchLocation = .zero
-                withAnimation { pressingItem = nil }
-                return
+            let velocity = value.predictedEndTranslation.width - value.translation.width
+            let inertia = velocity * 0.6
+            let targetOffset = scrollOffset + inertia
+            
+            let minOffset = min(0, containerWidth - contentWidth - (kPadding * 2))
+            let maxOffset: CGFloat = 0
+            
+            var finalDestination = targetOffset
+            if finalDestination > maxOffset { finalDestination = maxOffset }
+            else if finalDestination < minOffset { finalDestination = minOffset }
+            
+            withAnimation(.spring(response: 0.4, dampingFraction: 0.8, blendDuration: 0)) {
+                scrollOffset = finalDestination
             }
-            
-            // --- 判斷 B: 是否為重排模式 (Reorder Mode) ---
-            if reorderingItem != nil {
-                withAnimation(.spring(response: 0.4, dampingFraction: 0.6)) {
-                    reorderingItem = nil
-                }
-                saveButtonOrder()
-                
-                // 清理狀態
-                isReorderMode = false
-                touchStartTime = nil
-                startTouchLocation = .zero
-                withAnimation { pressingItem = nil }
-                return
-            }
-            
-            // --- 判斷 C: 點擊判定 (Tap Logic) ---
-            // ⚠️ 修正點：在這裡計算距離時，startTouchLocation 還保留著按下的位置
-            let dist = sqrt(pow(value.location.x - startTouchLocation.x, 2) + pow(value.location.y - startTouchLocation.y, 2))
-            
-            // 如果手指移動距離很小 (< 20)，且能算出來點到了哪個按鈕
-            if dist < 20, let index = calculateHitIndex(at: value.startLocation.x) {
-                let hitItem = buttons[index]
-                let generator = UIImpactFeedbackGenerator(style: .light)
-                generator.impactOccurred()
-                activeSheet = hitItem
-            }
-            
-            // C-1. 所有邏輯執行完畢，最後清理狀態
+            isScrollMode = false
             touchStartTime = nil
-            isReorderMode = false // 雙重保險
             startTouchLocation = .zero
             withAnimation { pressingItem = nil }
+            return
         }
+        
+        if reorderingItem != nil {
+            withAnimation(.spring(response: 0.4, dampingFraction: 0.6)) {
+                reorderingItem = nil
+            }
+            saveButtonOrder()
+            isReorderMode = false
+            touchStartTime = nil
+            startTouchLocation = .zero
+            withAnimation { pressingItem = nil }
+            return
+        }
+        
+        let dist = sqrt(pow(value.location.x - startTouchLocation.x, 2) + pow(value.location.y - startTouchLocation.y, 2))
+        if dist < 20, let index = calculateHitIndex(at: value.startLocation.x) {
+            let hitItem = buttons[index]
+            let generator = UIImpactFeedbackGenerator(style: .light)
+            generator.impactOccurred()
+            activeSheet = hitItem
+        }
+        
+        touchStartTime = nil
+        isReorderMode = false
+        startTouchLocation = .zero
+        withAnimation { pressingItem = nil }
+    }
+    
     private func startReordering(item: HomePageButtonCase, index: Int, containerY: CGFloat) {
         let generator = UIImpactFeedbackGenerator(style: .medium)
         generator.impactOccurred()
-        
         withAnimation {
             isReorderMode = true
             reorderingItem = item
-            
-            // ⚠️ 關鍵修正：透過數學公式計算按鈕中心點，而非依賴可能過期的 itemFrames
-            // 按鈕中心 X = Padding + (Index * Width) + (Width / 2) + ScrollOffset
             let centerX = kPadding + (CGFloat(index) * kButtonWidth) + (kButtonWidth / 2) + scrollOffset
-            
-            // 使用計算出來的精確位置
             ghostPosition = CGPoint(x: centerX, y: containerY)
+        }
+    }
+    
+    // MARK: - 自動捲動邏輯 (New)
+    
+    private func startAutoScroll(speed: CGFloat) {
+        // 如果計時器已經在跑，就不重複建立
+        guard autoScrollTimer == nil else { return }
+        
+        // 建立計時器 (每 0.016秒 = 60fps 更新一次)
+        autoScrollTimer = Timer.scheduledTimer(withTimeInterval: 0.016, repeats: true) { _ in
+            performAutoScrollStep(speed: speed)
+        }
+    }
+    
+    private func stopAutoScroll() {
+        autoScrollTimer?.invalidate()
+        autoScrollTimer = nil
+    }
+    
+    private func performAutoScrollStep(speed: CGFloat) {
+        // 1. 計算新的 Offset
+        var newOffset = scrollOffset + speed
+        
+        // 2. 邊界檢查 (不要滑過頭)
+        let minOffset = min(0, containerWidth - contentWidth - (kPadding * 2))
+        let maxOffset: CGFloat = 0
+        
+        if newOffset > maxOffset { newOffset = maxOffset }
+        else if newOffset < minOffset { newOffset = minOffset }
+        
+        // 如果已經到底了，就不用更新
+        if newOffset == scrollOffset { return }
+        
+        // 3. 更新畫面位置
+        // 這裡不需要 withAnimation，因為 Timer 更新頻率夠高，自動形成動畫
+        scrollOffset = newOffset
+        
+        // 4. ⚠️ 關鍵：因為列表在動，手指下的按鈕可能變了，所以要在這裡檢查碰撞
+        checkForReorderCollision(at: ghostPosition.x)
+    }
+    
+    // 抽取出碰撞檢查邏輯 (因為 HandleMove 和 Timer 都要用)
+    private func checkForReorderCollision(at xLocation: CGFloat) {
+        if let targetIndex = calculateHitIndex(at: xLocation) {
+            let targetItem = buttons[targetIndex]
+            if targetItem != reorderingItem {
+                withAnimation(.spring(response: 0.2, dampingFraction: 0.7)) {
+                    moveItem(from: reorderingItem!, to: targetItem)
+                }
+            }
         }
     }
     
     private func moveItem(from source: HomePageButtonCase, to destination: HomePageButtonCase) {
         guard let fromIndex = buttons.firstIndex(of: source),
               let toIndex = buttons.firstIndex(of: destination) else { return }
-        
         if fromIndex != toIndex {
             buttons.move(fromOffsets: IndexSet(integer: fromIndex), toOffset: toIndex > fromIndex ? toIndex + 1 : toIndex)
             let generator = UISelectionFeedbackGenerator()
@@ -1150,7 +1168,6 @@ struct HomePageView: View {
         try? viewContext.save()
     }
 }
-
 extension View {
     func classCornerRadius(_ radius: CGFloat) -> some View { self.cornerRadius(radius) }
 }
