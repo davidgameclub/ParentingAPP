@@ -21,6 +21,8 @@
 		4C5907052F3DEF4600E7B92A /* FeedingBottleActivity+CoreDataProperties.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C5906F92F3DEF4600E7B92A /* FeedingBottleActivity+CoreDataProperties.swift */; };
 		4C5907062F3DEF4600E7B92A /* DiaperActivity+CoreDataClass.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C5906F62F3DEF4600E7B92A /* DiaperActivity+CoreDataClass.swift */; };
 		4C5907072F3DEF4600E7B92A /* SleepActivity+CoreDataProperties.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C5906FB2F3DEF4600E7B92A /* SleepActivity+CoreDataProperties.swift */; };
+		4C9BDCD32F3EF9E100EB3EDA /* ButtonSortOrder+CoreDataClass.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C9BDCD12F3EF9E100EB3EDA /* ButtonSortOrder+CoreDataClass.swift */; };
+		4C9BDCD42F3EF9E100EB3EDA /* ButtonSortOrder+CoreDataProperties.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C9BDCD22F3EF9E100EB3EDA /* ButtonSortOrder+CoreDataProperties.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -39,6 +41,8 @@
 		4C5906FB2F3DEF4600E7B92A /* SleepActivity+CoreDataProperties.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SleepActivity+CoreDataProperties.swift"; sourceTree = "<group>"; };
 		4C5906FC2F3DEF4600E7B92A /* WakeupActivity+CoreDataClass.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "WakeupActivity+CoreDataClass.swift"; sourceTree = "<group>"; };
 		4C5906FD2F3DEF4600E7B92A /* WakeupActivity+CoreDataProperties.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "WakeupActivity+CoreDataProperties.swift"; sourceTree = "<group>"; };
+		4C9BDCD12F3EF9E100EB3EDA /* ButtonSortOrder+CoreDataClass.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ButtonSortOrder+CoreDataClass.swift"; sourceTree = "<group>"; };
+		4C9BDCD22F3EF9E100EB3EDA /* ButtonSortOrder+CoreDataProperties.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "ButtonSortOrder+CoreDataProperties.swift"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -63,6 +67,8 @@
 		4C5906B92F3DDCFB00E7B92A = {
 			isa = PBXGroup;
 			children = (
+				4C9BDCD12F3EF9E100EB3EDA /* ButtonSortOrder+CoreDataClass.swift */,
+				4C9BDCD22F3EF9E100EB3EDA /* ButtonSortOrder+CoreDataProperties.swift */,
 				4C5906F42F3DEF4600E7B92A /* CustomActivity+CoreDataClass.swift */,
 				4C5906F52F3DEF4600E7B92A /* CustomActivity+CoreDataProperties.swift */,
 				4C5906F62F3DEF4600E7B92A /* DiaperActivity+CoreDataClass.swift */,
@@ -175,6 +181,8 @@
 				4C5907062F3DEF4600E7B92A /* DiaperActivity+CoreDataClass.swift in Sources */,
 				4C5907072F3DEF4600E7B92A /* SleepActivity+CoreDataProperties.swift in Sources */,
 				4C5906DA2F3DDE6700E7B92A /* Persistence.swift in Sources */,
+				4C9BDCD32F3EF9E100EB3EDA /* ButtonSortOrder+CoreDataClass.swift in Sources */,
+				4C9BDCD42F3EF9E100EB3EDA /* ButtonSortOrder+CoreDataProperties.swift in Sources */,
 				4C5906DD2F3DDE8100E7B92A /* UserProfile+CoreDataProperties.swift in Sources */,
 				4C5906DE2F3DDE8100E7B92A /* UserProfile+CoreDataClass.swift in Sources */,
 				4C5906D82F3DDE1300E7B92A /* Model.xcdatamodeld in Sources */,

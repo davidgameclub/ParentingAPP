@@ -725,37 +725,221 @@ enum HomePageButtonCase: Int, Identifiable, CaseIterable{
     }
 }
 
+// 用於記錄按鈕位置的 PreferenceKey
+struct ItemFrameKey: PreferenceKey {
+    static var defaultValue: [HomePageButtonCase: CGRect] = [:]
+    static func reduce(value: inout [HomePageButtonCase: CGRect], nextValue: () -> [HomePageButtonCase: CGRect]) {
+        value.merge(nextValue(), uniquingKeysWith: { $1 })
+    }
+}
+
+// 提取單獨的按鈕視圖以保持清晰
+struct HomePageButtonView: View {
+    let caseItem: HomePageButtonCase
+    let action: () -> Void
+    
+    var body: some View {
+        VStack(spacing: 8) {
+            // 使用 onTapGesture 代替 Button 以避免手勢衝突
+            ZStack {
+                Ellipse().fill(caseItem.color).frame(width: 40, height: 12).blur(radius: 8).opacity(0.4).offset(y: 25)
+                Circle().fill(caseItem.color).frame(width: 60, height: 60)
+                Image(systemName: caseItem.iconName).font(.title2).foregroundColor(.white)
+            }
+            .contentShape(Circle()) // 確保點擊區域正確
+            .onTapGesture(perform: action)
+            
+            Text(caseItem.title).font(.caption).foregroundColor(.gray)
+        }
+    }
+}
+
 struct HomePageView: View {
+    @Environment(\.managedObjectContext) private var viewContext
     @State private var appState = AppState()
     @State private var activeSheet: HomePageButtonCase? = nil
+    
+    // Core Data Fetch Request: 取得按鈕順序
+    // 假設您已經在 .xcdatamodeld 建立了一個名為 ButtonSortOrder 的 Entity
+    // 屬性：typeID (Int16), sortIndex (Int16)
+    @FetchRequest(
+        sortDescriptors: [NSSortDescriptor(keyPath: \ButtonSortOrder.sortIndex, ascending: true)],
+        animation: .default)
+    private var savedSortOrders: FetchedResults<ButtonSortOrder>
+    
+    // 拖曳重排相關狀態
+    @State private var buttons: [HomePageButtonCase] = [] // 初始為空，等 onAppear 再載入
+    @State private var draggingItem: HomePageButtonCase? = nil
+    @State private var dragLocation: CGPoint = .zero
+    @State private var initialDragLocation: CGPoint = .zero
+    @State private var itemFrames: [HomePageButtonCase: CGRect] = [:]
+    
     var body: some View {
         VStack(spacing: 0) {
             DailyTimelineView().frame(height: 600)
             Spacer()
+            
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 15) {
-                    ForEach(HomePageButtonCase.allCases, id: \.id) { caseItem in
-                        VStack(spacing: 8) {
-                            Button(action: { activeSheet = caseItem }) {
-                                ZStack {
-                                    Ellipse().fill(caseItem.color).frame(width: 40, height: 12).blur(radius: 8).opacity(0.4).offset(y: 25)
-                                    Circle().fill(caseItem.color).frame(width: 60, height: 60)
-                                    Image(systemName: caseItem.iconName).font(.title2).foregroundColor(.white)
-                                }
+                    ForEach(buttons) { caseItem in
+                        HomePageButtonView(caseItem: caseItem) {
+                            // 點擊動作：只有在非拖曳模式下才觸發
+                            if draggingItem == nil {
+                                activeSheet = caseItem
                             }
-                            .buttonStyle(.plain)
-                            Text(caseItem.title).font(.caption).foregroundColor(.gray)
                         }
+                        // 讀取位置
+                        .overlay(GeometryReader { geo in
+                            Color.clear.preference(key: ItemFrameKey.self, value: [caseItem: geo.frame(in: .global)])
+                        })
+                        // 拖曳時隱藏原項目（佔位符）
+                        .opacity(draggingItem == caseItem ? 0 : 1)
+                        // 手勢邏輯
+                        .gesture(
+                            LongPressGesture(minimumDuration: 0.3)
+                                .sequenced(before: DragGesture(coordinateSpace: .global))
+                                .onChanged { value in
+                                    switch value {
+                                    case .second(true, let drag):
+                                        // 進入拖曳模式
+                                        if draggingItem == nil {
+                                            draggingItem = caseItem
+                                            // 觸覺回饋
+                                            let generator = UIImpactFeedbackGenerator(style: .medium)
+                                            generator.impactOccurred()
+                                            
+                                            // 設置初始位置為該項目的中心
+                                            if let frame = itemFrames[caseItem] {
+                                                initialDragLocation = CGPoint(x: frame.midX, y: frame.midY)
+                                                dragLocation = initialDragLocation
+                                            }
+                                        }
+                                        
+                                        // 更新位置
+                                        if let drag = drag {
+                                            // 使用初始中心點 + 拖曳位移
+                                            dragLocation = CGPoint(
+                                                x: initialDragLocation.x + drag.translation.width,
+                                                y: initialDragLocation.y + drag.translation.height
+                                            )
+                                            
+                                            // 檢查碰撞與重排
+                                            if let hoveredItem = findHoveredItem(at: dragLocation), hoveredItem != caseItem {
+                                                withAnimation(.spring(response: 0.35, dampingFraction: 0.7)) {
+                                                    if let fromIndex = buttons.firstIndex(of: caseItem),
+                                                       let toIndex = buttons.firstIndex(of: hoveredItem) {
+                                                        buttons.move(fromOffsets: IndexSet(integer: fromIndex), toOffset: toIndex > fromIndex ? toIndex + 1 : toIndex)
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    default: break
+                                    }
+                                }
+                                .onEnded { _ in
+                                    withAnimation(.spring(response: 0.4, dampingFraction: 0.6)) {
+                                        draggingItem = nil
+                                    }
+                                    // 拖曳結束：儲存順序
+                                    saveButtonOrder()
+                                }
+                        )
                     }
                 }
                 .padding(.horizontal, 20).padding(.bottom, 20)
             }
             .frame(height: 140)
+            .onPreferenceChange(ItemFrameKey.self) { itemFrames = $0 }
         }
         .navigationTitle("Home").background(appDeepGray.ignoresSafeArea()).preferredColorScheme(.dark).environment(appState)
+        // 浮動層：顯示正在被拖曳的項目
+        .overlay(alignment: .topLeading) {
+            if let draggingItem, let _ = itemFrames[draggingItem] {
+                HomePageButtonView(caseItem: draggingItem, action: {})
+                    .scaleEffect(1.2) // 放大效果
+                    .shadow(color: .black.opacity(0.5), radius: 10, x: 0, y: 10) // 陰影
+                    .position(dragLocation) // 跟隨手指
+                    .ignoresSafeArea()
+                    .allowsHitTesting(false) // 確保不阻擋下層交互
+            }
+        }
         .sheet(item: $activeSheet) { caseItem in
             ButtonDestinationView(buttonCase: caseItem, onDismiss: { activeSheet = nil }).environment(appState).presentationDetents([.medium, .large]).presentationDragIndicator(.visible)
         }
+        .onAppear {
+            loadButtonOrder()
+        }
+    }
+    
+    // 輔助函數：從 Core Data 載入順序或初始化
+    private func loadButtonOrder() {
+        if savedSortOrders.isEmpty {
+            // 第一次執行：初始化資料庫
+            self.buttons = HomePageButtonCase.allCases
+            saveButtonOrder() // 建立初始資料
+        } else {
+            // 從資料庫讀取並轉換回 Enum
+            let sortedIDs = savedSortOrders.sorted { $0.sortIndex < $1.sortIndex }.map { Int($0.typeID) }
+            var loadedButtons: [HomePageButtonCase] = []
+            
+            for id in sortedIDs {
+                if let btn = HomePageButtonCase(rawValue: id) {
+                    loadedButtons.append(btn)
+                }
+            }
+            
+            // 檢查是否有新功能按鈕不在資料庫中 (防呆)
+            let existingSet = Set(loadedButtons)
+            let missingButtons = HomePageButtonCase.allCases.filter { !existingSet.contains($0) }
+            
+            if !missingButtons.isEmpty {
+                loadedButtons.append(contentsOf: missingButtons)
+                self.buttons = loadedButtons
+                saveButtonOrder() // 更新缺少的項目
+            } else {
+                self.buttons = loadedButtons
+            }
+        }
+    }
+    
+    // 輔助函數：將當前順序儲存至 Core Data
+    private func saveButtonOrder() {
+        // 先建立一個 ID -> Entity 的查表，避免重複建立或 O(N^2) 搜尋
+        let existingRecords = Dictionary(grouping: savedSortOrders, by: { Int($0.typeID) })
+            .compactMapValues { $0.first }
+        
+        for (index, button) in buttons.enumerated() {
+            let sortIndex = Int16(index)
+            
+            if let existingEntity = existingRecords[button.rawValue] {
+                // 更新現有紀錄
+                if existingEntity.sortIndex != sortIndex {
+                    existingEntity.sortIndex = sortIndex
+                }
+            } else {
+                // 找不到紀錄，建立新的
+                let newEntity = ButtonSortOrder(context: viewContext)
+                newEntity.typeID = Int16(button.rawValue)
+                newEntity.sortIndex = sortIndex
+            }
+        }
+        
+        // 儲存 Context
+        do {
+            try viewContext.save()
+        } catch {
+            print("Error saving button order: \(error)")
+        }
+    }
+    
+    // 輔助函數：找出當前手指下方的項目
+    private func findHoveredItem(at point: CGPoint) -> HomePageButtonCase? {
+        for (item, frame) in itemFrames {
+            if frame.contains(point) {
+                return item
+            }
+        }
+        return nil
     }
 }
 
