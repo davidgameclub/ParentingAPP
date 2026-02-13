@@ -1,12 +1,12 @@
 // Persistence.swift
 
 import CoreData
-import CloudKit // 加入 CloudKit 框架引用
+import CloudKit
 
 struct PersistenceController {
     static let shared = PersistenceController()
 
-    // 1. 改用 NSPersistentCloudKitContainer 以支援 CloudKit 同步
+    // 1. 使用 NSPersistentCloudKitContainer 以支援 CloudKit 同步
     let container: NSPersistentCloudKitContainer
 
     init(inMemory: Bool = false) {
@@ -15,25 +15,56 @@ struct PersistenceController {
         
         if inMemory {
             container.persistentStoreDescriptions.first!.url = URL(fileURLWithPath: "/dev/null")
-        }
-        
-        // 2. CloudKit 同步與未來共享功能的關鍵設定
-        if let description = container.persistentStoreDescriptions.first {
-            // 開啟 Persistent History Tracking (CloudKit 同步必備，用於追蹤變更)
-            description.setOption(true as NSNumber, forKey: NSPersistentHistoryTrackingKey)
+        } else {
+            // MARK: - CloudKit 多人共享設定
             
-            // 開啟遠端變更通知 (讓 App 能收到 iCloud 來的變更)
-            description.setOption(true as NSNumber, forKey: NSPersistentStoreRemoteChangeNotificationPostOptionKey)
+            // TODO: 請將此字串替換為您在 Apple Developer Portal > CloudKit Console 建立的 Container ID
+            // 格式通常為 "iCloud.com.yourcompany.appname"
+            let iCloudContainerIdentifier = "iCloud.ParentingAPP"
             
-            // 未來若要實作「共享資料庫」(Shared Database)，您將需要在這裡設定 cloudKitContainerOptions
-            // 例如：
-            // let options = NSPersistentCloudKitContainerOptions(containerIdentifier: "iCloud.com.yourname.ParentingAPP")
-            // description.cloudKitContainerOptions = options
+            // 取得預設的儲存路徑 (Application Support)
+            let defaultDirectoryURL = NSPersistentContainer.defaultDirectoryURL()
+            
+            // --- 設定 1: Private Database (私有資料庫) ---
+            // 這是預設的主要儲存區，存放使用者自己的資料
+            let privateStoreURL = defaultDirectoryURL.appendingPathComponent("Model.sqlite")
+            let privateDescription = NSPersistentStoreDescription(url: privateStoreURL)
+            
+            // [FIX] 若您在 Core Data Model Editor 中沒有特別新增名為 "Default" 的 Configuration，請勿指定此行，否則會導致 Crash
+            // privateDescription.configuration = "Default"
+            
+            let privateOptions = NSPersistentCloudKitContainerOptions(containerIdentifier: iCloudContainerIdentifier)
+            privateOptions.databaseScope = .private
+            privateDescription.cloudKitContainerOptions = privateOptions
+            
+            // 開啟同步必備選項
+            privateDescription.setOption(true as NSNumber, forKey: NSPersistentHistoryTrackingKey)
+            privateDescription.setOption(true as NSNumber, forKey: NSPersistentStoreRemoteChangeNotificationPostOptionKey)
+            
+            // --- 設定 2: Shared Database (共享資料庫) ---
+            // 這是用來存放與他人共享之 records 的儲存區
+            let sharedStoreURL = defaultDirectoryURL.appendingPathComponent("Model_Shared.sqlite")
+            let sharedDescription = NSPersistentStoreDescription(url: sharedStoreURL)
+            
+            // [FIX] 同上，若無 "Default" Configuration，請勿指定
+            // sharedDescription.configuration = "Default"
+            
+            let sharedOptions = NSPersistentCloudKitContainerOptions(containerIdentifier: iCloudContainerIdentifier)
+            sharedOptions.databaseScope = .shared // 關鍵：設定 Scope 為 .shared
+            sharedDescription.cloudKitContainerOptions = sharedOptions
+            
+            // 開啟同步必備選項
+            sharedDescription.setOption(true as NSNumber, forKey: NSPersistentHistoryTrackingKey)
+            sharedDescription.setOption(true as NSNumber, forKey: NSPersistentStoreRemoteChangeNotificationPostOptionKey)
+            
+            // 將兩個 Description 載入 Container
+            // 注意：Private Store 放在第一個，這樣新增物件時預設會寫入 Private Store
+            container.persistentStoreDescriptions = [privateDescription, sharedDescription]
         }
         
         container.loadPersistentStores { (storeDescription, error) in
             if let error = error as NSError? {
-                // 建議在正式版中優化這裡的錯誤處理，不要使用 fatalError
+                // 建議在正式版中優化這裡的錯誤處理
                 fatalError("Unresolved error \(error), \(error.userInfo)")
             }
         }
