@@ -757,213 +757,397 @@ struct ItemFrameKey: PreferenceKey {
     }
 }
 
-// 提取單獨的按鈕視圖以保持清晰
+
+// 全域常數設定
+private let kButtonWidth: CGFloat = 80.0
+private let kPadding: CGFloat = 20.0
+private let kContainerHeight: CGFloat = 140.0
+
+// MARK: - 純 UI 元件：按鈕外觀
 struct HomePageButtonView: View {
     let caseItem: HomePageButtonCase
-    let action: () -> Void
-    
+    let isDragging: Bool
+    let isPressed: Bool
+
     var body: some View {
         VStack(spacing: 8) {
-            // 使用 onTapGesture 代替 Button 以避免手勢衝突
             ZStack {
-                Ellipse().fill(caseItem.color).frame(width: 40, height: 12).blur(radius: 8).opacity(0.4).offset(y: 25)
-                Circle().fill(caseItem.color).frame(width: 60, height: 60)
-                Image(systemName: caseItem.iconName).font(.title2).foregroundColor(.white)
+                Ellipse()
+                    .fill(caseItem.color)
+                    .frame(width: 40, height: 12)
+                    .blur(radius: 8)
+                    .opacity(0.4)
+                    .offset(y: 25)
+                
+                Circle()
+                    .fill(caseItem.color)
+                    .frame(width: 60, height: 60)
+                    .scaleEffect(isDragging ? 1.2 : (isPressed ? 1.1 : 1.0))
+                    .shadow(color: isDragging ? .black.opacity(0.3) : .clear, radius: 10, x: 0, y: 10)
+                
+                Image(systemName: caseItem.iconName)
+                    .font(.title2)
+                    .foregroundColor(.white)
+                    .scaleEffect(isDragging ? 1.2 : (isPressed ? 1.1 : 1.0))
             }
-            .contentShape(Circle()) // 確保點擊區域正確
-            .onTapGesture(perform: action)
+            .frame(width: 60, height: 60)
             
-            Text(caseItem.title).font(.caption).foregroundColor(.gray)
+            Text(caseItem.title)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundColor(.gray)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 2)
         }
+        .frame(width: kButtonWidth) // 固定寬度
+        .contentShape(Rectangle())
+        .opacity(isDragging ? 0 : 1)
+        .animation(.spring(response: 0.3, dampingFraction: 0.6), value: isPressed)
     }
 }
 
+// MARK: - 主視圖
 struct HomePageView: View {
     @Environment(\.managedObjectContext) private var viewContext
     @State private var appState = AppState()
+    
+    @State private var buttons: [HomePageButtonCase] = []
     @State private var activeSheet: HomePageButtonCase? = nil
     
-    // Core Data Fetch Request: 取得按鈕順序
-    // 假設您已經在 .xcdatamodeld 建立了一個名為 ButtonSortOrder 的 Entity
-    // 屬性：typeID (Int16), sortIndex (Int16)
     @FetchRequest(
         sortDescriptors: [NSSortDescriptor(keyPath: \ButtonSortOrder.sortIndex, ascending: true)],
         animation: .default)
     private var savedSortOrders: FetchedResults<ButtonSortOrder>
     
-    // 拖曳重排相關狀態
-    @State private var buttons: [HomePageButtonCase] = [] // 初始為空，等 onAppear 再載入
-    @State private var draggingItem: HomePageButtonCase? = nil
-    @State private var dragLocation: CGPoint = .zero
-    @State private var initialDragLocation: CGPoint = .zero
-    @State private var itemFrames: [HomePageButtonCase: CGRect] = [:]
+    // --- 狀態變數 ---
+    @State private var scrollOffset: CGFloat = 0
+    @State private var currentDragOffset: CGFloat = 0
+    @State private var contentWidth: CGFloat = 0
+    @State private var containerWidth: CGFloat = 0
     
+    @State private var reorderingItem: HomePageButtonCase? = nil
+    @State private var ghostPosition: CGPoint = .zero
+    @State private var pressingItem: HomePageButtonCase? = nil
+    
+    @State private var isScrollMode: Bool = false
+    @State private var isReorderMode: Bool = false
+    @State private var touchStartTime: Date? = nil
+    @State private var startTouchLocation: CGPoint = .zero
+
     var body: some View {
         VStack(spacing: 0) {
             DailyTimelineView().frame(height: 600)
             Spacer()
             
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 15) {
-                    ForEach(buttons) { caseItem in
-                        HomePageButtonView(caseItem: caseItem) {
-                            // 點擊動作：只有在非拖曳模式下才觸發
-                            if draggingItem == nil {
-                                activeSheet = caseItem
-                            }
-                        }
-                        // 讀取位置
-                        .overlay(GeometryReader { geo in
-                            Color.clear.preference(key: ItemFrameKey.self, value: [caseItem: geo.frame(in: .global)])
-                        })
-                        // 拖曳時隱藏原項目（佔位符）
-                        .opacity(draggingItem == caseItem ? 0 : 1)
-                        // 手勢邏輯
-                        .gesture(
-                            LongPressGesture(minimumDuration: 0.3)
-                                .sequenced(before: DragGesture(coordinateSpace: .global))
-                                .onChanged { value in
-                                    switch value {
-                                    case .second(true, let drag):
-                                        // 進入拖曳模式
-                                        if draggingItem == nil {
-                                            draggingItem = caseItem
-                                            // 觸覺回饋
-                                            let generator = UIImpactFeedbackGenerator(style: .medium)
-                                            generator.impactOccurred()
-                                            
-                                            // 設置初始位置為該項目的中心
-                                            if let frame = itemFrames[caseItem] {
-                                                initialDragLocation = CGPoint(x: frame.midX, y: frame.midY)
-                                                dragLocation = initialDragLocation
-                                            }
-                                        }
-                                        
-                                        // 更新位置
-                                        if let drag = drag {
-                                            // 使用初始中心點 + 拖曳位移
-                                            dragLocation = CGPoint(
-                                                x: initialDragLocation.x + drag.translation.width,
-                                                y: initialDragLocation.y + drag.translation.height
-                                            )
-                                            
-                                            // 檢查碰撞與重排
-                                            if let hoveredItem = findHoveredItem(at: dragLocation), hoveredItem != caseItem {
-                                                withAnimation(.spring(response: 0.35, dampingFraction: 0.7)) {
-                                                    if let fromIndex = buttons.firstIndex(of: caseItem),
-                                                       let toIndex = buttons.firstIndex(of: hoveredItem) {
-                                                        buttons.move(fromOffsets: IndexSet(integer: fromIndex), toOffset: toIndex > fromIndex ? toIndex + 1 : toIndex)
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    default: break
-                                    }
-                                }
-                                .onEnded { _ in
-                                    withAnimation(.spring(response: 0.4, dampingFraction: 0.6)) {
-                                        draggingItem = nil
-                                    }
-                                    // 拖曳結束：儲存順序
-                                    saveButtonOrder()
-                                }
-                        )
-                    }
-                }
-                .padding(.horizontal, 20).padding(.bottom, 20)
-            }
-            .frame(height: 140)
-            .onPreferenceChange(ItemFrameKey.self) { itemFrames = $0 }
+            // 自定義滑動區域
+            customScrollView
+                .frame(height: kContainerHeight)
+                .zIndex(1)
         }
-        .navigationTitle("Home").background(appDeepGray.ignoresSafeArea()).preferredColorScheme(.dark).environment(appState)
-        // 浮動層：顯示正在被拖曳的項目
-        .overlay(alignment: .topLeading) {
-            if let draggingItem, let _ = itemFrames[draggingItem] {
-                HomePageButtonView(caseItem: draggingItem, action: {})
-                    .scaleEffect(1.2) // 放大效果
-                    .shadow(color: .black.opacity(0.5), radius: 10, x: 0, y: 10) // 陰影
-                    .position(dragLocation) // 跟隨手指
-                    .ignoresSafeArea()
-                    .allowsHitTesting(false) // 確保不阻擋下層交互
-            }
-        }
+        .navigationTitle("Home")
+        .background(appDeepGray.ignoresSafeArea())
+        .preferredColorScheme(.dark)
+        .environment(appState)
+        .overlay(reorderingOverlay, alignment: .topLeading)
         .sheet(item: $activeSheet) { caseItem in
-            ButtonDestinationView(buttonCase: caseItem, onDismiss: { activeSheet = nil }).environment(appState).presentationDetents([.medium, .large]).presentationDragIndicator(.visible)
+            ButtonDestinationView(buttonCase: caseItem, onDismiss: { activeSheet = nil })
+                .environment(appState)
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
         }
         .onAppear {
             loadButtonOrder()
         }
     }
     
-    // 輔助函數：從 Core Data 載入順序或初始化
-    private func loadButtonOrder() {
-        if savedSortOrders.isEmpty {
-            // 第一次執行：初始化資料庫
-            self.buttons = HomePageButtonCase.allCases
-            saveButtonOrder() // 建立初始資料
-        } else {
-            // 從資料庫讀取並轉換回 Enum
-            let sortedIDs = savedSortOrders.sorted { $0.sortIndex < $1.sortIndex }.map { Int($0.typeID) }
-            var loadedButtons: [HomePageButtonCase] = []
+    // MARK: - 自定義滑動視圖
+    
+    private var customScrollView: some View {
+        GeometryReader { geo in
+            let frame = geo.frame(in: .global)
             
-            for id in sortedIDs {
-                if let btn = HomePageButtonCase(rawValue: id) {
-                    loadedButtons.append(btn)
+            ZStack(alignment: .leading) {
+                // 內容層
+                HStack(spacing: 0) { // 間距設為0，完全由 frame(width: 80) 控制
+                    ForEach(buttons) { item in
+                        HomePageButtonView(
+                            caseItem: item,
+                            isDragging: reorderingItem == item,
+                            isPressed: pressingItem == item
+                        )
+                    }
+                }
+                .padding(.horizontal, kPadding)
+                .background(GeometryReader { contentGeo in
+                    Color.clear.onAppear {
+                        // 初始化寬度
+                        self.contentWidth = contentGeo.size.width
+                        self.containerWidth = frame.width
+                    }
+                    .onChange(of: buttons.count) { _, _ in
+                        self.contentWidth = contentGeo.size.width
+                    }
+                })
+                .offset(x: scrollOffset + (isReorderMode ? 0 : currentDragOffset))
+            }
+            .frame(height: kContainerHeight)
+            .contentShape(Rectangle()) // 確保手勢區域覆蓋整個容器
+            .gesture(
+                DragGesture(minimumDistance: 0, coordinateSpace: .global)
+                    .onChanged { value in
+                        handleTouchMove(value: value, containerFrame: frame)
+                    }
+                    .onEnded { value in
+                        handleTouchEnd(value: value)
+                    }
+            )
+            .onAppear {
+                self.containerWidth = frame.width
+            }
+        }
+        .clipped()
+    }
+    
+    @ViewBuilder
+    private var reorderingOverlay: some View {
+        if let reorderingItem = reorderingItem {
+            HomePageButtonView(caseItem: reorderingItem, isDragging: false, isPressed: true)
+                .scaleEffect(1.2)
+                .position(ghostPosition)
+                .ignoresSafeArea()
+                .allowsHitTesting(false)
+        }
+    }
+    
+    // MARK: - 核心邏輯 (數學計算取代座標偵測)
+    
+    /// 根據觸控點的 Global X 座標，計算出點到了第幾個按鈕
+    private func calculateHitIndex(at globalX: CGFloat) -> Int? {
+        // 1. 取得相對於 Container 左側的 X (扣除 Global Frame 的偏移)
+        // 由於我們 DragGesture 用 .global，但我們需要知道它相對於內容起始點的位置
+        // 假設 container 充滿螢幕寬度，我們主要關心 X 軸相對位移
+        
+        // 內容的起始 X 位置 = scrollOffset + padding
+        // 觸控點相對於內容第一顆按鈕左邊界的距離 = globalX - (scrollOffset + padding)
+        
+        let relativeX = globalX - (scrollOffset + kPadding)
+        
+        // 算出是第幾顆 (無條件捨去)
+        let index = Int(floor(relativeX / kButtonWidth))
+        
+        // 邊界檢查
+        if index >= 0 && index < buttons.count {
+            return index
+        }
+        return nil
+    }
+
+    private func handleTouchMove(value: DragGesture.Value, containerFrame: CGRect) {
+        let location = value.location
+        let translation = value.translation
+        
+        // 1. 剛按下去
+        if touchStartTime == nil {
+            touchStartTime = Date()
+            startTouchLocation = location
+            
+            // 使用數學計算命中哪個按鈕
+            if let index = calculateHitIndex(at: location.x) {
+                let hitItem = buttons[index]
+                
+                withAnimation(.easeOut(duration: 0.1)) {
+                    pressingItem = hitItem
+                }
+                
+                // 啟動長按計時
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                    if pressingItem == hitItem && !isScrollMode && !isReorderMode {
+                        startReordering(item: hitItem, index: index, containerY: containerFrame.midY)
+                    }
+                }
+            }
+        }
+        
+        // 2. 模式處理
+        if isReorderMode {
+            // --- 重排模式 ---
+            withAnimation(.interactiveSpring(response: 0.1, dampingFraction: 0.7)) {
+                ghostPosition = location
+            }
+            
+            // 檢查是否移到了別的按鈕位置 (同樣使用數學計算)
+            if let targetIndex = calculateHitIndex(at: location.x) {
+                let targetItem = buttons[targetIndex]
+                if targetItem != reorderingItem {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                        moveItem(from: reorderingItem!, to: targetItem)
+                    }
                 }
             }
             
-            // 檢查是否有新功能按鈕不在資料庫中 (防呆)
-            let existingSet = Set(loadedButtons)
-            let missingButtons = HomePageButtonCase.allCases.filter { !existingSet.contains($0) }
+        } else {
+            // --- 滑動判定 ---
+            let dragDistance = sqrt(pow(translation.width, 2) + pow(translation.height, 2))
             
-            if !missingButtons.isEmpty {
-                loadedButtons.append(contentsOf: missingButtons)
-                self.buttons = loadedButtons
-                saveButtonOrder() // 更新缺少的項目
-            } else {
-                self.buttons = loadedButtons
+            if dragDistance > 6 {
+                if !isScrollMode {
+                    isScrollMode = true
+                    withAnimation { pressingItem = nil }
+                }
+            }
+            
+            if isScrollMode {
+                let proposedOffset = scrollOffset + translation.width
+                // 邊界阻尼
+                let minOffset = min(0, containerWidth - contentWidth - (kPadding * 2))
+                
+                if proposedOffset > 0 {
+                    currentDragOffset = translation.width - (proposedOffset * 0.5)
+                } else if proposedOffset < minOffset {
+                    let overshoot = minOffset - proposedOffset
+                    currentDragOffset = translation.width + (overshoot * 0.5)
+                } else {
+                    currentDragOffset = translation.width
+                }
             }
         }
     }
     
-    // 輔助函數：將當前順序儲存至 Core Data
+    private func handleTouchEnd(value: DragGesture.Value) {
+            // 1. 為了避免邏輯錯誤，我們先把需要的狀態存下來，或者調整執行順序
+            // 這裡我們採用「先判斷、後清理」的策略
+            
+            // --- 判斷 A: 是否為滑動模式 (Scroll Mode) ---
+            if isScrollMode {
+                // A-1. 提交位移 (Commit): 解決跳動的關鍵
+                // 把目前的「暫時位移」加進「永久捲動值」，這樣畫面就會停在手指放開的地方
+                let currentVisualOffset = scrollOffset + currentDragOffset
+                scrollOffset = currentVisualOffset
+                currentDragOffset = 0
+                
+                // A-2. 計算慣性 (Inertia)
+                let velocity = value.predictedEndTranslation.width - value.translation.width
+                let inertia = velocity * 0.6 // 慣性係數
+                let targetOffset = scrollOffset + inertia
+                
+                // A-3. 邊界限制 (Clamping)
+                let minOffset = min(0, containerWidth - contentWidth - (kPadding * 2))
+                let maxOffset: CGFloat = 0
+                
+                var finalDestination = targetOffset
+                if finalDestination > maxOffset { finalDestination = maxOffset }
+                else if finalDestination < minOffset { finalDestination = minOffset }
+                
+                // A-4. 執行滑動動畫
+                withAnimation(.spring(response: 0.4, dampingFraction: 0.8, blendDuration: 0)) {
+                    scrollOffset = finalDestination
+                }
+                
+                // A-5. 最後才清理狀態
+                isScrollMode = false
+                touchStartTime = nil
+                startTouchLocation = .zero
+                withAnimation { pressingItem = nil }
+                return
+            }
+            
+            // --- 判斷 B: 是否為重排模式 (Reorder Mode) ---
+            if reorderingItem != nil {
+                withAnimation(.spring(response: 0.4, dampingFraction: 0.6)) {
+                    reorderingItem = nil
+                }
+                saveButtonOrder()
+                
+                // 清理狀態
+                isReorderMode = false
+                touchStartTime = nil
+                startTouchLocation = .zero
+                withAnimation { pressingItem = nil }
+                return
+            }
+            
+            // --- 判斷 C: 點擊判定 (Tap Logic) ---
+            // ⚠️ 修正點：在這裡計算距離時，startTouchLocation 還保留著按下的位置
+            let dist = sqrt(pow(value.location.x - startTouchLocation.x, 2) + pow(value.location.y - startTouchLocation.y, 2))
+            
+            // 如果手指移動距離很小 (< 20)，且能算出來點到了哪個按鈕
+            if dist < 20, let index = calculateHitIndex(at: value.startLocation.x) {
+                let hitItem = buttons[index]
+                let generator = UIImpactFeedbackGenerator(style: .light)
+                generator.impactOccurred()
+                activeSheet = hitItem
+            }
+            
+            // C-1. 所有邏輯執行完畢，最後清理狀態
+            touchStartTime = nil
+            isReorderMode = false // 雙重保險
+            startTouchLocation = .zero
+            withAnimation { pressingItem = nil }
+        }
+    private func startReordering(item: HomePageButtonCase, index: Int, containerY: CGFloat) {
+        let generator = UIImpactFeedbackGenerator(style: .medium)
+        generator.impactOccurred()
+        
+        withAnimation {
+            isReorderMode = true
+            reorderingItem = item
+            
+            // ⚠️ 關鍵修正：透過數學公式計算按鈕中心點，而非依賴可能過期的 itemFrames
+            // 按鈕中心 X = Padding + (Index * Width) + (Width / 2) + ScrollOffset
+            let centerX = kPadding + (CGFloat(index) * kButtonWidth) + (kButtonWidth / 2) + scrollOffset
+            
+            // 使用計算出來的精確位置
+            ghostPosition = CGPoint(x: centerX, y: containerY)
+        }
+    }
+    
+    private func moveItem(from source: HomePageButtonCase, to destination: HomePageButtonCase) {
+        guard let fromIndex = buttons.firstIndex(of: source),
+              let toIndex = buttons.firstIndex(of: destination) else { return }
+        
+        if fromIndex != toIndex {
+            buttons.move(fromOffsets: IndexSet(integer: fromIndex), toOffset: toIndex > fromIndex ? toIndex + 1 : toIndex)
+            let generator = UISelectionFeedbackGenerator()
+            generator.selectionChanged()
+        }
+    }
+    
+    // MARK: - Core Data (不變)
+    private func loadButtonOrder() {
+        if savedSortOrders.isEmpty {
+            self.buttons = HomePageButtonCase.allCases
+            saveButtonOrder()
+        } else {
+            let sortedIDs = savedSortOrders.sorted { $0.sortIndex < $1.sortIndex }.map { Int($0.typeID) }
+            var loadedButtons: [HomePageButtonCase] = []
+            for id in sortedIDs {
+                if let btn = HomePageButtonCase(rawValue: id) { loadedButtons.append(btn) }
+            }
+            let existingSet = Set(loadedButtons)
+            let missingButtons = HomePageButtonCase.allCases.filter { !existingSet.contains($0) }
+            if !missingButtons.isEmpty {
+                loadedButtons.append(contentsOf: missingButtons)
+                self.buttons = loadedButtons
+                saveButtonOrder()
+            } else { self.buttons = loadedButtons }
+        }
+    }
+    
     private func saveButtonOrder() {
-        // 先建立一個 ID -> Entity 的查表，避免重複建立或 O(N^2) 搜尋
         let existingRecords = Dictionary(grouping: savedSortOrders, by: { Int($0.typeID) })
             .compactMapValues { $0.first }
-        
         for (index, button) in buttons.enumerated() {
             let sortIndex = Int16(index)
-            
             if let existingEntity = existingRecords[button.rawValue] {
-                // 更新現有紀錄
-                if existingEntity.sortIndex != sortIndex {
-                    existingEntity.sortIndex = sortIndex
-                }
+                if existingEntity.sortIndex != sortIndex { existingEntity.sortIndex = sortIndex }
             } else {
-                // 找不到紀錄，建立新的
                 let newEntity = ButtonSortOrder(context: viewContext)
                 newEntity.typeID = Int16(button.rawValue)
                 newEntity.sortIndex = sortIndex
             }
         }
-        
-        // 儲存 Context
-        do {
-            try viewContext.save()
-        } catch {
-            print("Error saving button order: \(error)")
-        }
-    }
-    
-    // 輔助函數：找出當前手指下方的項目
-    private func findHoveredItem(at point: CGPoint) -> HomePageButtonCase? {
-        for (item, frame) in itemFrames {
-            if frame.contains(point) {
-                return item
-            }
-        }
-        return nil
+        try? viewContext.save()
     }
 }
 
